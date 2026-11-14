@@ -12,8 +12,9 @@ class Settings(BaseSettings):
     debug: bool = True
     secret_key: str = "change-me"
 
-    database_url: str = "postgresql+asyncpg://ekvi:ekvi@localhost:5432/ekvi"
-    database_url_sync: str = "postgresql://ekvi:ekvi@localhost:5432/ekvi"
+    # Default: SQLite — no Docker required.
+    # For Postgres: postgresql+asyncpg://ekvi:ekvi@localhost:5432/ekvi
+    database_url: str = "sqlite+aiosqlite:///./data/ekvi.db"
 
     storage_backend: str = "local"
     storage_local_path: str = "./data/object_store"
@@ -38,6 +39,10 @@ class Settings(BaseSettings):
     @property
     def allowed_mime_list(self) -> List[str]:
         return [m.strip() for m in self.allowed_mime_types.split(",") if m.strip()]
+
+    @property
+    def is_sqlite(self) -> bool:
+        return self.database_url.startswith("sqlite")
 
 
 @lru_cache
