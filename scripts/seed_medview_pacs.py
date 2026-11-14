@@ -2,15 +2,18 @@
 """Seed the MedView PACS synthetic benchmark (STRAT §21).
 
 Creates a minimal set of planted cases that exercise C1–C14.
-Run after migrations: python scripts/seed_medview_pacs.py
+Run: python scripts/seed_medview_pacs.py
 """
 
 from __future__ import annotations
 
 import asyncio
+import sys
+from pathlib import Path
 
 from sqlalchemy import select
 
+from ekvi.config import get_settings
 from ekvi.core.db import AsyncSessionLocal, Base, engine
 from ekvi.models.artefacts import (
     ArtefactType,
@@ -18,6 +21,9 @@ from ekvi.models.artefacts import (
     Project,
     Tenant,
 )
+
+# Ensure disposition model is registered on metadata
+import ekvi.models.disposition  # noqa: F401
 
 
 CASES = [
@@ -61,8 +67,32 @@ CASES = [
 
 
 async def main() -> None:
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    settings = get_settings()
+    print(f"DATABASE_URL = {settings.database_url}")
+
+    if settings.is_sqlite:
+        raw = settings.database_url.replace("sqlite+aiosqlite:///", "")
+        db_file = Path(raw)
+        if not db_file.is_absolute():
+            db_file = Path.cwd() / db_file
+        db_file.parent.mkdir(parents=True, exist_ok=True)
+        print(f"SQLite file  = {db_file.resolve()}")
+
+    try:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+    except Exception as exc:
+        print("\nERROR connecting to the database.", file=sys.stderr)
+        print(f"  {type(exc).__name__}: {exc}", file=sys.stderr)
+        if "aiosqlite" in str(exc).lower() or "no module" in str(exc).lower():
+            print("\nFix: pip install aiosqlite", file=sys.stderr)
+        if "postgresql" in settings.database_url or "asyncpg" in settings.database_url:
+            print(
+                "\nYour .env still points at Postgres. For no-Docker use, set in .env:\n"
+                "  DATABASE_URL=sqlite+aiosqlite:///./data/ekvi.db",
+                file=sys.stderr,
+            )
+        raise SystemExit(1) from exc
 
     async with AsyncSessionLocal() as db:
         result = await db.execute(select(Tenant).limit(1))
