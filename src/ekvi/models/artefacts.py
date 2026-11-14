@@ -5,6 +5,8 @@ Key invariants:
 - Source documents and content blocks preserve spans and extraction confidence.
 - Relationships carry provenance and approval state (proposed by default).
 - Findings always reference evidence spans; absolute assessment is non-configurable.
+
+Types are portable (UUID/JSON) so SQLite and Postgres both work.
 """
 
 from __future__ import annotations
@@ -21,12 +23,13 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    JSON,
     String,
     Text,
     UniqueConstraint,
+    Uuid,
     func,
 )
-from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from ekvi.core.db import Base
@@ -103,21 +106,21 @@ class JobStatus(str, enum.Enum):
 class Tenant(Base):
     __tablename__ = "tenants"
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
-    settings: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    settings: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class Project(Base):
     __tablename__ = "projects"
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     tenant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tenants.id"), nullable=False, index=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     product: Mapped[Optional[str]] = mapped_column(String(255))
     version_context: Mapped[Optional[str]] = mapped_column(String(128))
-    configuration: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    configuration: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     documents: Mapped[list["SourceDocument"]] = relationship(back_populates="project")
@@ -127,14 +130,14 @@ class Project(Base):
 class SourceDocument(Base):
     __tablename__ = "source_documents"
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     project_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("projects.id"), nullable=False, index=True)
     object_key: Mapped[str] = mapped_column(String(512), nullable=False)
     filename: Mapped[str] = mapped_column(String(512), nullable=False)
     mime_type: Mapped[str] = mapped_column(String(128), nullable=False)
     checksum: Mapped[str] = mapped_column(String(128), nullable=False)
     source_revision: Mapped[Optional[str]] = mapped_column(String(128))
-    upload_metadata: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    upload_metadata: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     project: Mapped["Project"] = relationship(back_populates="documents")
@@ -144,15 +147,15 @@ class SourceDocument(Base):
 class DocumentRevision(Base):
     __tablename__ = "document_revisions"
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     document_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("source_documents.id"), nullable=False, index=True)
     revision_label: Mapped[str] = mapped_column(String(128), nullable=False)
     effective_date: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
-    supersedes_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True))
+    supersedes_id: Mapped[Optional[uuid.UUID]] = mapped_column(Uuid)
     processing_status: Mapped[JobStatus] = mapped_column(
         Enum(JobStatus), default=JobStatus.QUEUED, nullable=False
     )
-    extraction_quality: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    extraction_quality: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     document: Mapped["SourceDocument"] = relationship(back_populates="revisions")
@@ -167,7 +170,7 @@ class ContentBlock(Base):
         Index("ix_content_blocks_revision_type", "revision_id", "block_type"),
     )
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     revision_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("document_revisions.id"), nullable=False)
     block_type: Mapped[str] = mapped_column(String(64), nullable=False)
     text: Mapped[str] = mapped_column(Text, nullable=False)
@@ -178,7 +181,7 @@ class ContentBlock(Base):
     char_start: Mapped[Optional[int]] = mapped_column(Integer)
     char_end: Mapped[Optional[int]] = mapped_column(Integer)
     extraction_confidence: Mapped[Optional[float]] = mapped_column(Float)
-    extra: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    extra: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     revision: Mapped["DocumentRevision"] = relationship(back_populates="blocks")
@@ -190,13 +193,13 @@ class EngineeringArtefact(Base):
         UniqueConstraint("project_id", "artefact_type", "external_id", name="uq_artefact_external"),
     )
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     project_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("projects.id"), nullable=False, index=True)
     artefact_type: Mapped[ArtefactType] = mapped_column(Enum(ArtefactType), nullable=False)
     external_id: Mapped[str] = mapped_column(String(128), nullable=False)
     title: Mapped[Optional[str]] = mapped_column(String(1024))
     status: Mapped[Optional[str]] = mapped_column(String(64))
-    current_revision_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True))
+    current_revision_id: Mapped[Optional[uuid.UUID]] = mapped_column(Uuid)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     project: Mapped["Project"] = relationship(back_populates="artefacts")
@@ -206,10 +209,10 @@ class EngineeringArtefact(Base):
 class ArtefactRevision(Base):
     __tablename__ = "artefact_revisions"
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     artefact_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("engineering_artefacts.id"), nullable=False, index=True)
-    source_revision_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True))
-    normalised_fields: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    source_revision_id: Mapped[Optional[uuid.UUID]] = mapped_column(Uuid)
+    normalised_fields: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     raw_text: Mapped[Optional[str]] = mapped_column(Text)
     effective_from: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     effective_to: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
@@ -221,7 +224,7 @@ class ArtefactRevision(Base):
 class Requirement(Base):
     __tablename__ = "requirements"
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     artefact_revision_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("artefact_revisions.id"), nullable=False, unique=True
     )
@@ -229,14 +232,14 @@ class Requirement(Base):
     parent_external_id: Mapped[Optional[str]] = mapped_column(String(128))
     normative_text: Mapped[str] = mapped_column(Text, nullable=False)
     requirement_type: Mapped[Optional[str]] = mapped_column(String(64))
-    attributes: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
-    source_span: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    attributes: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    source_span: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
 
 
 class TestCase(Base):
     __tablename__ = "test_cases"
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     artefact_revision_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("artefact_revisions.id"), nullable=False, unique=True
     )
@@ -244,7 +247,7 @@ class TestCase(Base):
     preconditions: Mapped[Optional[str]] = mapped_column(Text)
     test_data: Mapped[Optional[str]] = mapped_column(Text)
     status: Mapped[Optional[str]] = mapped_column(String(64))
-    source_span: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    source_span: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
 
     steps: Mapped[list["TestStep"]] = relationship(back_populates="test_case")
 
@@ -255,12 +258,12 @@ class TestStep(Base):
         Index("ix_test_steps_case_seq", "test_case_id", "sequence"),
     )
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     test_case_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("test_cases.id"), nullable=False)
     sequence: Mapped[int] = mapped_column(Integer, nullable=False)
     action: Mapped[str] = mapped_column(Text, nullable=False)
     expected_result: Mapped[Optional[str]] = mapped_column(Text)
-    source_span: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    source_span: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
 
     test_case: Mapped["TestCase"] = relationship(back_populates="steps")
 
@@ -268,7 +271,7 @@ class TestStep(Base):
 class Defect(Base):
     __tablename__ = "defects"
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     artefact_revision_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("artefact_revisions.id"), nullable=False, unique=True
     )
@@ -279,7 +282,7 @@ class Defect(Base):
     root_cause: Mapped[Optional[str]] = mapped_column(Text)
     fix_summary: Mapped[Optional[str]] = mapped_column(Text)
     release_ref: Mapped[Optional[str]] = mapped_column(String(128))
-    source_span: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    source_span: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
 
 
 class Relationship(Base):
@@ -290,18 +293,18 @@ class Relationship(Base):
         Index("ix_relationships_source_target", "source_artefact_id", "target_artefact_id"),
     )
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    source_artefact_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
-    source_revision_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True))
-    target_artefact_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
-    target_revision_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True))
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    source_artefact_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    source_revision_id: Mapped[Optional[uuid.UUID]] = mapped_column(Uuid)
+    target_artefact_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    target_revision_id: Mapped[Optional[uuid.UUID]] = mapped_column(Uuid)
     relationship_type: Mapped[RelationshipType] = mapped_column(Enum(RelationshipType), nullable=False)
     status: Mapped[RelationshipStatus] = mapped_column(
         Enum(RelationshipStatus), default=RelationshipStatus.PROPOSED, nullable=False
     )
     provenance_type: Mapped[ProvenanceType] = mapped_column(Enum(ProvenanceType), nullable=False)
     confidence: Mapped[Optional[float]] = mapped_column(Float)
-    source_evidence: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    source_evidence: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     created_by: Mapped[Optional[str]] = mapped_column(String(128))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     approved_by: Mapped[Optional[str]] = mapped_column(String(128))
@@ -311,14 +314,14 @@ class Relationship(Base):
 class AssessmentRun(Base):
     __tablename__ = "assessment_runs"
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     project_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("projects.id"), nullable=False, index=True)
     analysis_type: Mapped[str] = mapped_column(String(64), nullable=False)
-    input_revision_ids: Mapped[list[Any]] = mapped_column(JSONB, default=list)
+    input_revision_ids: Mapped[list[Any]] = mapped_column(JSON, default=list)
     model_provider: Mapped[Optional[str]] = mapped_column(String(64))
     model_version: Mapped[Optional[str]] = mapped_column(String(128))
     prompt_template_version: Mapped[Optional[str]] = mapped_column(String(64))
-    configuration: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    configuration: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     status: Mapped[JobStatus] = mapped_column(Enum(JobStatus), default=JobStatus.QUEUED)
     started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
@@ -332,17 +335,17 @@ class Finding(Base):
 
     __tablename__ = "findings"
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     assessment_run_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("assessment_runs.id"), nullable=False, index=True
     )
-    affected_entity_ids: Mapped[list[Any]] = mapped_column(JSONB, default=list)
+    affected_entity_ids: Mapped[list[Any]] = mapped_column(JSON, default=list)
     category: Mapped[FindingCategory] = mapped_column(Enum(FindingCategory), nullable=False)
     coverage_status: Mapped[Optional[CoverageStatus]] = mapped_column(Enum(CoverageStatus))
     severity: Mapped[Optional[str]] = mapped_column(String(32))
     confidence: Mapped[Optional[float]] = mapped_column(Float)
     explanation: Mapped[str] = mapped_column(Text, nullable=False)
-    evidence_references: Mapped[list[Any]] = mapped_column(JSONB, default=list)
+    evidence_references: Mapped[list[Any]] = mapped_column(JSON, default=list)
     recommended_action: Mapped[Optional[str]] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -353,7 +356,7 @@ class Finding(Base):
 class ReviewDecision(Base):
     __tablename__ = "review_decisions"
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     finding_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("findings.id"), nullable=False, index=True)
     reviewer: Mapped[str] = mapped_column(String(128), nullable=False)
     disposition: Mapped[str] = mapped_column(String(64), nullable=False)
@@ -367,13 +370,13 @@ class ReviewDecision(Base):
 class AuditEvent(Base):
     __tablename__ = "audit_events"
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     actor: Mapped[Optional[str]] = mapped_column(String(128))
-    tenant_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True))
-    project_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True))
+    tenant_id: Mapped[Optional[uuid.UUID]] = mapped_column(Uuid)
+    project_id: Mapped[Optional[uuid.UUID]] = mapped_column(Uuid)
     action: Mapped[str] = mapped_column(String(128), nullable=False)
     target_type: Mapped[Optional[str]] = mapped_column(String(64))
     target_id: Mapped[Optional[str]] = mapped_column(String(128))
     correlation_id: Mapped[Optional[str]] = mapped_column(String(64))
-    metadata_: Mapped[dict[str, Any]] = mapped_column("metadata", JSONB, default=dict)
+    metadata_: Mapped[dict[str, Any]] = mapped_column("metadata", JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
